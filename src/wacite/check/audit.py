@@ -163,10 +163,41 @@ def audit_citations(
     return report
 
 
-def audit_document(path: str, index: CiteIndex) -> AuditReport:
-    """Extract, parse (incl. short forms), and audit a document end-to-end."""
+def align_document(
+    report: AuditReport,
+    text: str,
+    citations: list[ParsedCitation],
+    index: CiteIndex,
+    **align_opts,
+) -> AuditReport:
+    """Append Phase-2 substantive-alignment findings to an existing report.
+
+    Purely additive — Phase-1 findings are untouched. Imported lazily so the
+    heavy alignment dependencies are only required when ``--align`` is used.
+    """
+    from wacite.align.judge import align_citations
+
+    report.findings.extend(align_citations(citations, text, index, **align_opts))
+    return report
+
+
+def audit_document(
+    path: str,
+    index: CiteIndex,
+    *,
+    align: bool = False,
+    align_opts: dict | None = None,
+) -> AuditReport:
+    """Extract, parse (incl. short forms), and audit a document end-to-end.
+
+    When ``align`` is set, the optional Phase-2 substantive-alignment pass runs
+    after the Phase-1 audit and appends advisory findings.
+    """
     text = extract_text(path)
     full = parse_citations(text)
     short = expand_shortforms(text, full)
     citations = sorted(full + short, key=lambda c: c.start)
-    return audit_citations(citations, index, source=str(path))
+    report = audit_citations(citations, index, source=str(path))
+    if align:
+        align_document(report, text, citations, index, **(align_opts or {}))
+    return report

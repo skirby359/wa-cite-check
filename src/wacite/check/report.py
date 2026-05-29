@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from rich.console import Console
 from rich.table import Table
@@ -17,12 +18,30 @@ _SEVERITY_STYLE = {
 _SEVERITY_ORDER = [Severity.ERROR, Severity.WARNING, Severity.INFO]
 
 
+def make_console(**kwargs) -> Console:
+    """Build a Console that won't crash on legacy Windows (cp1252) consoles.
+
+    rich encodes its output with the stdout stream's codec. On a default Windows
+    PowerShell/conhost that codec is cp1252, which can't encode the ✓ marker or
+    the box-drawing characters the tables use, so it raises UnicodeEncodeError on
+    otherwise-fine output. Reconfiguring the stream to UTF-8 with
+    errors="replace" lets those characters render on a UTF-8-capable console and
+    degrade to a replacement character (never a crash) on a legacy one.
+    """
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # Stream isn't a reconfigurable TextIOWrapper (e.g. captured/redirected).
+        pass
+    return Console(**kwargs)
+
+
 def to_json(report: AuditReport) -> str:
     return json.dumps(report.to_dict(), indent=2)
 
 
 def render_console(report: AuditReport, console: Console | None = None) -> None:
-    console = console or Console()
+    console = console or make_console()
 
     console.print()
     console.rule(f"[bold]Citation audit: {report.source}")

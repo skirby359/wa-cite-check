@@ -18,6 +18,15 @@ dependencies = [
 [project.optional-dependencies]
 # Only needed to (re)build the SQLite index from the live wa-legal-ai Postgres corpus.
 build = ["psycopg[binary]>=3.1"]
+# Phase-2 substantive alignment. Reads corpus text at check time and runs an LLM
+# judge. Also requires the wa-legal-ai package itself, installed editable from the
+# sibling checkout: `pip install -e ../wa-legal-ai`.
+align = [
+    "psycopg[binary]>=3.1",        # live corpus access at check time
+    "sentence-transformers>=3.0",  # embed propositions to rank passages
+    "httpx>=0.27",                 # Ollama transport (local judge)
+    "anthropic>=0.40",             # Claude provider (optional at runtime)
+]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

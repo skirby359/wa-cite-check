@@ -21,6 +21,9 @@ class FindingType(str, Enum):
     PARALLEL_MISMATCH = "PARALLEL_MISMATCH"
     NEGATIVE_TREATMENT = "NEGATIVE_TREATMENT"
     PIN_NOT_VERIFIED = "PIN_NOT_VERIFIED"
+    # Phase 2 — substantive alignment (advisory; never gates the exit code).
+    UNSUPPORTED_PROPOSITION = "UNSUPPORTED_PROPOSITION"
+    WEAK_SUPPORT = "WEAK_SUPPORT"
 
 
 # Map each finding type to its default severity.
@@ -31,6 +34,9 @@ FINDING_SEVERITY: dict[FindingType, Severity] = {
     FindingType.PARALLEL_MISMATCH: Severity.ERROR,
     FindingType.NEGATIVE_TREATMENT: Severity.WARNING,
     FindingType.PIN_NOT_VERIFIED: Severity.INFO,
+    # Advisory: a judge's read on substantive support is a hint, not a hard error.
+    FindingType.UNSUPPORTED_PROPOSITION: Severity.WARNING,
+    FindingType.WEAK_SUPPORT: Severity.INFO,
 }
 
 
@@ -84,6 +90,8 @@ class Finding:
     severity: Severity
     message: str
     authority: AuthorityRecord | None = None
+    # Phase-2 alignment: the judge's one-line explanation (None for Phase-1 findings).
+    rationale: str | None = None
 
     def to_dict(self) -> dict:
         cit = self.citation
@@ -97,6 +105,7 @@ class Finding:
             "from_shortform": cit.from_shortform,
             "authority_id": self.authority.authority_id if self.authority else None,
             "matched_title": self.authority.display_title if self.authority else None,
+            "rationale": self.rationale,
         }
 
 
