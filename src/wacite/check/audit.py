@@ -39,6 +39,26 @@ NEGATIVE_STATUSES = {
     "limited",
 }
 
+# Case-law treatments apply ONLY to cases. A statute or regulation is never
+# "overruled"/"abrogated"/"superseded" — it gets repealed or amended. Gating by
+# authority type stops upstream mis-marking (e.g. a current statute stamped
+# 'superseded' by noisy citation-graph extraction) from being reported to the
+# user as bad law. 'repealed' stays broadly applicable (statutes get repealed).
+_CASE_ONLY_STATUSES = {
+    "overruled",
+    "abrogated",
+    "superseded",
+    "questioned",
+    "limited",
+}
+
+
+def _status_applies(authority_type: str | None, status: str) -> bool:
+    """Whether a negative status is legitimate for this authority type."""
+    if status in _CASE_ONLY_STATUSES:
+        return authority_type == "case"
+    return True
+
 
 def _finding(cit: ParsedCitation, ftype: FindingType, msg: str,
              authority: AuthorityRecord | None = None) -> Finding:
@@ -104,7 +124,10 @@ def _check_parallel(cit: ParsedCitation, auth: AuthorityRecord,
 
 def _check_status(cit: ParsedCitation, auth: AuthorityRecord) -> Finding | None:
     """Check 5: cited authority is still good law."""
-    if auth.authority_status in NEGATIVE_STATUSES:
+    if (
+        auth.authority_status in NEGATIVE_STATUSES
+        and _status_applies(auth.authority_type, auth.authority_status)
+    ):
         return _finding(
             cit,
             FindingType.NEGATIVE_TREATMENT,

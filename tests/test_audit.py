@@ -49,6 +49,20 @@ def test_overruled_authority_flagged(index):
     assert report.warning_count == 1
 
 
+def test_statute_mismarked_case_treatment_not_flagged(index):
+    # A statute wrongly stamped with a case treatment ('superseded') must NOT be
+    # reported as bad law — statutes are never overruled/superseded.
+    report = _audit("Under RCW 26.16.030, community property is...", index)
+    assert report.citations_resolved == 1
+    assert FindingType.NEGATIVE_TREATMENT not in _types(report)
+
+
+def test_repealed_statute_still_flagged(index):
+    # 'repealed' is legitimate for a statute and must still be reported.
+    report = _audit("See RCW 9A.52.900 for the savings clause.", index)
+    assert FindingType.NEGATIVE_TREATMENT in _types(report)
+
+
 def test_parallel_mismatch_flagged(index):
     # "199 Wn.2d 1" -> Smith, but "999 P.3d 9" -> a different authority.
     report = _audit("State v. Smith, 199 Wn.2d 1, 999 P.3d 9 (2022).", index)

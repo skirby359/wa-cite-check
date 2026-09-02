@@ -58,6 +58,33 @@ FIXTURE_ROWS = [
         "authority_status": "current",
         "parallel_cites": [],
     },
+    {
+        # Bad data: a statute stamped with a CASE treatment ('superseded').
+        # Statutes are never overruled/superseded — this must NOT be reported.
+        "authority_id": "a-rcw-badstatus",
+        "authority_type": "statute",
+        "canonical_cite": "RCW 26.16.030",
+        "canonical_cite_normalized": "rcw 26.16.030",
+        "display_title": "Community property",
+        "year": None,
+        "court_name": None,
+        "court_level": None,
+        "authority_status": "superseded",
+        "parallel_cites": [],
+    },
+    {
+        # Legitimate: a statute can be 'repealed' — this MUST still be reported.
+        "authority_id": "a-rcw-repealed",
+        "authority_type": "statute",
+        "canonical_cite": "RCW 9A.52.900",
+        "canonical_cite_normalized": "rcw 9a.52.900",
+        "display_title": "Savings — repealed provision",
+        "year": None,
+        "court_name": None,
+        "court_level": None,
+        "authority_status": "repealed",
+        "parallel_cites": [],
+    },
 ]
 
 
