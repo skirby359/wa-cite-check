@@ -49,7 +49,8 @@ def render_console(report: AuditReport, console: Console | None = None) -> None:
         f"Citations found: [bold]{report.citations_found}[/]   "
         f"resolved: [green]{report.citations_resolved}[/]   "
         f"errors: [red]{report.error_count}[/]   "
-        f"warnings: [yellow]{report.warning_count}[/]"
+        f"warnings: [yellow]{report.warning_count}[/]   "
+        f"pins checked: {report.pins_checked}   quotes checked: {report.quotes_checked}"
     )
 
     if not report.findings:

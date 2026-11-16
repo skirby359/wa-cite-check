@@ -64,6 +64,7 @@ def expand_shortforms(
                 page=antecedent.page,
                 pincite=pin,
                 year=antecedent.year,
+                court=antecedent.court,
                 lookup_key=antecedent.lookup_key,
                 from_shortform=True,
             )

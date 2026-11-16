@@ -11,13 +11,15 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from wacite.index.store import SCHEMA
 from wacite.normalize import normalize_cite
+from wacite.pages import page_map
 
 # Pull only what the format/accuracy audit needs. Year prefers date_decided
-# (when the opinion issued) and falls back to date_filed.
+# (when the opinion issued) and falls back to date_filed. A case's text is read
+# only to find its page markers (wacite.pages); it is not stored in the index.
 _CORPUS_QUERY = """
     SELECT
         authority_id::text                                   AS authority_id,
@@ -29,7 +31,8 @@ _CORPUS_QUERY = """
         court_name,
         court_level,
         authority_status::text                               AS authority_status,
-        parallel_cites
+        parallel_cites,
+        CASE WHEN authority_type = 'case' THEN full_text END AS full_text
     FROM authority
 """
 
@@ -49,10 +52,12 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
 
     Each row dict needs: authority_id, authority_type, canonical_cite,
     canonical_cite_normalized, display_title, year, court_name, court_level,
-    authority_status, parallel_cites (list[str] | None).
+    authority_status, parallel_cites (list[str] | None); optionally
+    page_range: (marked reporter cite, first page, last page).
 
     Returns (authority_count, cite_lookup_count). Reused by tests to build
-    fixture indexes without PostgreSQL.
+    fixture indexes without PostgreSQL. ``rows`` may be a generator: it is read
+    once, row by row.
     """
     out_path = Path(out_path)
     if out_path.exists():
@@ -87,6 +92,13 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
                 ),
             )
             n_auth += 1
+            if r.get("page_range"):
+                cite, first, last = r["page_range"]
+                conn.execute(
+                    "INSERT OR REPLACE INTO page_range (authority_id, cite_normalized, first_page, last_page) "
+                    "VALUES (?,?,?,?)",
+                    (r["authority_id"], normalize_cite(cite), first, last),
+                )
 
             # Index the canonical cite plus every parallel reporter cite.
             keys = [r["canonical_cite_normalized"]]
@@ -107,14 +119,29 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
         conn.close()
 
 
+def with_page_ranges(rows: Iterable[dict]) -> Iterator[dict]:
+    """Add each case's page_range from its text's star markers, then drop the text."""
+    for r in rows:
+        text = r.pop("full_text", None)
+        if text and r.get("authority_type") == "case":
+            pm = page_map(text, list(r.get("parallel_cites") or []) + [r.get("canonical_cite") or ""])
+            if pm:
+                r["page_range"] = (pm.cite, pm.first_page, pm.last_page)
+        yield r
+
+
 def build_from_postgres(out_path: str | Path, dsn: str | None = None) -> tuple[int, int]:
-    """Read the corpus authority table and write the SQLite index."""
+    """Read the corpus authority table and write the SQLite index.
+
+    Rows stream through a server-side cursor: case text (about 2.4 GB in
+    November 2026) is read only to find page markers, never held all at once.
+    """
     import psycopg  # optional dependency; only needed for the build step
     from psycopg.rows import dict_row
 
     dsn = dsn or default_dsn()
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(name="wacite_build") as cur:
+            cur.itersize = 2000
             cur.execute(_CORPUS_QUERY)
-            rows = cur.fetchall()
-    return write_index(out_path, rows)
+            return write_index(out_path, with_page_ranges(cur))

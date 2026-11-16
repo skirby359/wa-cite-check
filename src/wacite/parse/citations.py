@@ -181,6 +181,7 @@ def parse_citations(text: str) -> list[ParsedCitation]:
                 page=page,
                 pincite=pin,
                 year=int(m.group("year")) if m.group("year") else None,
+                court=(m.group("court") or "").strip() or None,
                 parallel=parallel,
                 lookup_key=f"{vol} {rep} {page}",
             )

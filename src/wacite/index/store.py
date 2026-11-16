@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS cite_lookup (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lookup_aid ON cite_lookup(authority_id);
+
+-- Pages of the one reporter whose star pagination the stored opinion text marks
+-- (see wacite.pages). Cases only; absent when the text has no markers.
+CREATE TABLE IF NOT EXISTS page_range (
+    authority_id    TEXT PRIMARY KEY,
+    cite_normalized TEXT NOT NULL,
+    first_page      INTEGER NOT NULL,
+    last_page       INTEGER NOT NULL
+);
 """
 
 
@@ -82,6 +91,18 @@ class CiteIndex:
         """Resolve a cite string straight to its authority record."""
         aid = self.resolve(cite)
         return self.get_authority(aid) if aid else None
+
+    def page_range(self, authority_id: str) -> tuple[str, int, int] | None:
+        """(marked reporter cite, first page, last page), or None when the stored
+        text has no page markers or the index predates page ranges."""
+        try:
+            row = self._conn.execute(
+                "SELECT cite_normalized, first_page, last_page FROM page_range WHERE authority_id = ?",
+                (authority_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:  # index built before page_range existed
+            return None
+        return (row["cite_normalized"], row["first_page"], row["last_page"]) if row else None
 
     def count_authorities(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM authority").fetchone()[0]

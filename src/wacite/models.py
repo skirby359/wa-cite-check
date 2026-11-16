@@ -21,6 +21,12 @@ class FindingType(str, Enum):
     PARALLEL_MISMATCH = "PARALLEL_MISMATCH"
     NEGATIVE_TREATMENT = "NEGATIVE_TREATMENT"
     PIN_NOT_VERIFIED = "PIN_NOT_VERIFIED"
+    # Pin-page checks against the stored opinion's star pagination.
+    PIN_OUT_OF_RANGE = "PIN_OUT_OF_RANGE"
+    QUOTE_ELSEWHERE = "QUOTE_ELSEWHERE"
+    QUOTE_NOT_FOUND = "QUOTE_NOT_FOUND"
+    # A cite to a court the corpus does not hold (e.g. the U.S. Supreme Court).
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
     # Phase 2 — substantive alignment (advisory; never gates the exit code).
     UNSUPPORTED_PROPOSITION = "UNSUPPORTED_PROPOSITION"
     WEAK_SUPPORT = "WEAK_SUPPORT"
@@ -34,6 +40,12 @@ FINDING_SEVERITY: dict[FindingType, Severity] = {
     FindingType.PARALLEL_MISMATCH: Severity.ERROR,
     FindingType.NEGATIVE_TREATMENT: Severity.WARNING,
     FindingType.PIN_NOT_VERIFIED: Severity.INFO,
+    # Warnings, not errors: a stored text can be incomplete (a missing dissent,
+    # say), so a page or quote the corpus lacks is a reason to look, not proof.
+    FindingType.PIN_OUT_OF_RANGE: Severity.WARNING,
+    FindingType.QUOTE_ELSEWHERE: Severity.WARNING,
+    FindingType.QUOTE_NOT_FOUND: Severity.WARNING,
+    FindingType.OUT_OF_SCOPE: Severity.INFO,
     # Advisory: a judge's read on substantive support is a hint, not a hard error.
     FindingType.UNSUPPORTED_PROPOSITION: Severity.WARNING,
     FindingType.WEAK_SUPPORT: Severity.INFO,
@@ -59,6 +71,7 @@ class ParsedCitation:
     page: str | None = None
     pincite: str | None = None        # e.g. "512" from "199 Wn.2d 1, 512"
     year: int | None = None
+    court: str | None = None          # court in the year parenthetical, e.g. "9th Cir."
     parallel: list[str] = field(default_factory=list)  # other reporter cites in the same cite
     # Resolution target used for lookup (reporter cite for cases, full cite otherwise)
     lookup_key: str = ""
@@ -116,6 +129,8 @@ class AuditReport:
     source: str
     citations_found: int = 0
     citations_resolved: int = 0
+    pins_checked: int = 0     # pin cites checked against the opinion's marked pages
+    quotes_checked: int = 0   # quotations checked against the pinned page's text
     findings: list[Finding] = field(default_factory=list)
 
     @property
@@ -131,6 +146,8 @@ class AuditReport:
             "source": self.source,
             "citations_found": self.citations_found,
             "citations_resolved": self.citations_resolved,
+            "pins_checked": self.pins_checked,
+            "quotes_checked": self.quotes_checked,
             "error_count": self.error_count,
             "warning_count": self.warning_count,
             "findings": [f.to_dict() for f in self.findings],

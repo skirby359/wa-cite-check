@@ -21,6 +21,8 @@ FIXTURE_ROWS = [
         "court_level": 1,
         "authority_status": "current",
         "parallel_cites": ["199 Wn.2d 1", "502 P.3d 1"],
+        # The stored text marks the Wn.2d pages, 1 through 30 (wacite.pages).
+        "page_range": ("199 Wn.2d 1", 1, 30),
     },
     {
         "authority_id": "a-jones",
@@ -45,6 +47,19 @@ FIXTURE_ROWS = [
         "court_level": 2,
         "authority_status": "current",
         "parallel_cites": ["999 P.3d 9"],
+    },
+    {
+        # A mandamus caption naming the judge; briefs cite it as "United States v. Roe".
+        "authority_id": "a-roe",
+        "authority_type": "case",
+        "canonical_cite": "500 F.2d 100",
+        "canonical_cite_normalized": "500 f.2d 100",
+        "display_title": "United States v. The Honorable Jane Q. Roe, United States District Judge",
+        "year": 1971,
+        "court_name": "Ninth Circuit Court of Appeals",
+        "court_level": 1,
+        "authority_status": "current",
+        "parallel_cites": ["500 F.2d 100"],
     },
     {
         "authority_id": "a-rcw",

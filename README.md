@@ -15,8 +15,12 @@ A standalone Washington legal **citation checker** built on top of a Washington 
 **Phase 1 — format / accuracy audit.** Point it at a motion (`.docx`, `.pdf`, or `.txt`) and it
 extracts every citation, confirms each one exists in the corpus, and cross-checks the attached
 **case name**, **year**, **parallel cite**, and **authority status** (overruled / repealed / etc.).
-It runs **fully offline**: the corpus database is read once to build a small portable SQLite index;
-all checking happens against that file.
+**Pin cites** are checked against the opinion's own page breaks (the star pagination in the stored
+text): a pin outside the opinion's pages is flagged, and with `--quotes` a quotation is looked for
+on the pinned page. A cite to a court the corpus doesn't hold, such as the U.S. Supreme Court, is
+reported as out of scope rather than as an error. It runs **fully offline**: the corpus database is
+read once to build a small portable SQLite index; all checking happens against that file (only
+`--quotes` and `--align` read the corpus at check time).
 
 **Phase 2 (optional) — substantive alignment.** With `--align`, each citation that resolves is
 checked for *substance*: does the cited authority actually support the proposition it's offered
@@ -67,6 +71,9 @@ wacite build-index --out cite_index.sqlite
 wacite check motion.docx --index cite_index.sqlite
 wacite check motion.pdf  --json        # machine-readable report
 
+# Also check quotations against the pinned page (reads opinion text from the corpus Postgres).
+wacite check motion.docx --quotes
+
 # Add the Phase-2 substantive-alignment pass with a local Ollama judge.
 ollama pull qwen2.5:7b-instruct
 wacite check motion.docx --align \
@@ -85,13 +92,24 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
 | `YEAR_MISMATCH` | error | Parenthetical year disagrees with the corpus. |
 | `PARALLEL_MISMATCH` | error | The given parallel reporters point to different authorities. |
 | `NEGATIVE_TREATMENT` | warning | Authority is overruled / repealed / abrogated / etc. |
-| `PIN_NOT_VERIFIED` | info | Pin page can't be confirmed — the corpus has no star pagination. |
+| `PIN_OUT_OF_RANGE` | warning | The pin page is outside the opinion's pages, per the page markers in the stored text. |
+| `QUOTE_ELSEWHERE` | warning | *(--quotes)* The quotation before the cite starts on another page than the pin. |
+| `QUOTE_NOT_FOUND` | warning | *(--quotes)* The quoted words (or part of them) aren't in the stored opinion text. |
+| `PIN_NOT_VERIFIED` | info | Pin page can't be checked: the stored text has no page markers, or marks another reporter's pages. |
+| `OUT_OF_SCOPE` | info | Cite to a court the corpus doesn't hold (U.S. Supreme Court, another circuit, district or state); not checked. |
 | `UNSUPPORTED_PROPOSITION` | warning | *(--align)* The judge found the authority doesn't support the proposition. Advisory. |
 | `WEAK_SUPPORT` | info | *(--align)* The judge found only partial/uncertain support. Advisory. |
 
 ## Limitations
 
-- **Pin pages** are reported, not verified (no page-level mapping in the corpus).
+- **Pin pages** can be checked only in the one reporter whose page breaks the stored text marks,
+  usually the official one (Wash. 2d, Wash. App., F.3d), and only where the text has markers: in a
+  November 2026 sample, 98% of Washington Supreme Court opinions, 90% of Court of Appeals, 54% of
+  9th Circuit, nearly all district court opinions. Pin and quote findings are warnings: a stored
+  text can be incomplete (a missing dissent, say).
+- **Coverage:** Washington Supreme Court and Court of Appeals, the 9th Circuit (Washington-related
+  cases only), W.D. and E.D. Wash. No U.S. Supreme Court opinions. A not-found 9th Circuit cite may
+  just be outside that coverage; the finding says so.
 - **Scanned PDFs** need OCR first; only text-based PDFs are read.
 - Reporter folding handles common WA / Pacific / Federal variants (`Wn.2d` ⇄ `Wash. 2d`); exotic reporters may miss.
 

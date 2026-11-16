@@ -64,13 +64,28 @@ def build_index(out: str, dsn: str | None) -> None:
               help="PostgreSQL DSN for the corpus (defaults to WALEGAL_DB_* env).")
 @click.option("--top-k", default=3, show_default=True,
               help="Passages per authority shown to the judge.")
+@click.option("--quotes", "check_quotes", is_flag=True,
+              help="Also check that a quotation before a pinned cite is on the pinned page "
+                   "(reads opinion text from the corpus Postgres; needs psycopg).")
 def check(document: str, index_path: str, as_json: bool, do_align: bool,
           llm_provider: str | None, llm_url: str | None, llm_model: str | None,
-          dsn: str | None, top_k: int) -> None:
+          dsn: str | None, top_k: int, check_quotes: bool) -> None:
     """Audit every citation in DOCUMENT (.docx/.pdf/.txt) against the corpus."""
     from wacite.check.audit import audit_document
     from wacite.check.report import exit_code, render_console, to_json
     from wacite.index.store import CiteIndex
+
+    page_source = None
+    if check_quotes:
+        try:
+            import psycopg  # noqa: F401
+        except ImportError:
+            console.print("[red]--quotes needs psycopg. Install with: "
+                          "pip install 'wa-cite-check[build]'[/]")
+            sys.exit(2)
+        from wacite.check.opinions import CorpusText
+
+        page_source = CorpusText(dsn)
 
     align_opts = None
     if do_align:
@@ -92,8 +107,13 @@ def check(document: str, index_path: str, as_json: bool, do_align: bool,
             "top_k": top_k,
         }
 
-    with CiteIndex(index_path) as index:
-        report = audit_document(document, index, align=do_align, align_opts=align_opts)
+    try:
+        with CiteIndex(index_path) as index:
+            report = audit_document(document, index, align=do_align, align_opts=align_opts,
+                                    page_source=page_source)
+    finally:
+        if page_source is not None:
+            page_source.close()
 
     if as_json:
         click.echo(to_json(report))
