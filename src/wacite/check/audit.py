@@ -175,7 +175,11 @@ def _out_of_scope(cit: ParsedCitation) -> str | None:
     if cit.kind != "case":
         return None
     if cit.reporter and _SCOTUS_REPORTER.match(cit.reporter.strip()):
-        return "U.S. Supreme Court opinions are not in the corpus"
+        # Since 2026-11-16 the corpus holds the Court's merits decisions (an index built
+        # after that ingest resolves them); orders, cert denials and decisions newer than
+        # the corpus still aren't there.
+        return ("this U.S. Supreme Court cite isn't in the corpus, which holds at most the Court's "
+                "merits decisions (not orders or cert denials, nor the newest decisions)")
     court = cit.court or ""
     if not court or _NINTH.search(court) or _WA_DISTRICT.search(court):
         return None
@@ -196,14 +200,17 @@ _QUOTE_WINDOW = 400
 PageSource = Callable[[str], "str | None"]  # authority_id -> stored opinion text
 
 
-def quote_before(text: str, cit: ParsedCitation, floor: int = 0) -> str | None:
-    """The last quotation that ends within _QUOTE_WINDOW characters before ``cit``
-    and after ``floor`` (the end of the previous citation)."""
-    lo = max(floor, cit.start - _QUOTE_WINDOW)
+def quote_before(text: str, cit: ParsedCitation, starts: list[int] | None = None) -> str | None:
+    """The last quotation that ends within _QUOTE_WINDOW characters before ``cit``,
+    unless another citation (one of ``starts``) begins between the quotation's end and
+    ``cit``: then the quotation belongs to that one. A citation inside the quotation
+    ("... without a CrR 3.5 hearing") doesn't count."""
     found = None
-    for m in _QUOTE.finditer(text, lo, cit.start):
-        found = m.group(1) or m.group(2)
-    return found
+    for m in _QUOTE.finditer(text, max(0, cit.start - _QUOTE_WINDOW), cit.start):
+        found = m
+    if found is None or any(found.end() <= s < cit.start for s in starts or []):
+        return None
+    return found.group(1) or found.group(2)
 
 
 def _check_pin(cit: ParsedCitation, auth: AuthorityRecord, index: CiteIndex) -> tuple[Finding | None, bool]:
@@ -229,14 +236,25 @@ def _check_pin(cit: ParsedCitation, auth: AuthorityRecord, index: CiteIndex) -> 
 
 
 def _check_quote(cit: ParsedCitation, auth: AuthorityRecord, quote: str, opinion: str) -> tuple[Finding | None, bool]:
-    """(finding, checked): is the quotation on the pinned page?"""
+    """(finding, checked): is the quotation on the pinned page? When the pinned page
+    can't be located (no pin, no page markers, or another reporter's pages are
+    marked), the quotation is still looked for anywhere in the opinion."""
     pm = page_map(opinion, list(auth.parallel_cites) + [auth.canonical_cite])
     pins = parse_pin(cit.pincite)
+    short = quote if len(quote) <= 70 else quote[:67] + "..."
     if pm is None or pins is None or pm.cite_normalized != normalize_cite(cit.lookup_key):
-        return None, False
+        hits, found_all = quote_pages(quote, {0: opinion})
+        if not hits:
+            return _finding(cit, FindingType.QUOTE_NOT_FOUND,
+                            f"quoted words \"{short}\" were not found in the stored opinion text "
+                            f"(page not checked)", auth), True
+        if not found_all:
+            return _finding(cit, FindingType.QUOTE_NOT_FOUND,
+                            f"part of the quotation \"{short}\" was not found in the stored opinion text "
+                            f"(page not checked)", auth), True
+        return None, True
     hits, found_all = quote_pages(quote, page_texts(opinion, pm))
     start, end = pins
-    short = quote if len(quote) <= 70 else quote[:67] + "..."
     if not hits:
         return _finding(cit, FindingType.QUOTE_NOT_FOUND,
                         f"quoted words \"{short}\" were not found in the stored opinion text", auth), True
@@ -262,10 +280,9 @@ def audit_citations(
     """
     report = AuditReport(source=source, citations_found=len(citations))
     opinions: dict[str, str | None] = {}
-    prev_end = 0
+    starts = [c.start for c in citations]
 
     for cit in citations:
-        floor, prev_end = prev_end, cit.end
         auth = index.lookup_by_cite(cit.lookup_key)
 
         if auth is None:
@@ -301,21 +318,26 @@ def audit_citations(
                 report.findings.append(check)
 
         # Check 6: the pin page, against the stored text's page markers.
+        pin_finding = None
         if cit.pincite and cit.kind == "case":
-            finding, checked = _check_pin(cit, auth, index)
+            pin_finding, checked = _check_pin(cit, auth, index)
             report.pins_checked += checked
-            if finding:
-                report.findings.append(finding)
-            if checked and finding is None and text and page_source:
-                quote = quote_before(text, cit, floor)
-                if quote:
-                    if auth.authority_id not in opinions:
-                        opinions[auth.authority_id] = page_source(auth.authority_id)
-                    if opinions[auth.authority_id]:
-                        qf, qchecked = _check_quote(cit, auth, quote, opinions[auth.authority_id])
-                        report.quotes_checked += qchecked
-                        if qf:
-                            report.findings.append(qf)
+            if pin_finding:
+                report.findings.append(pin_finding)
+        # Check 7 (with a page source): a quotation just before a case cite, on the
+        # pinned page, or anywhere in the opinion when its page can't be located. Skipped
+        # after a pin outside the opinion's pages: that finding already says what's wrong.
+        out_of_range = pin_finding is not None and pin_finding.finding_type is FindingType.PIN_OUT_OF_RANGE
+        if cit.kind == "case" and text and page_source and not out_of_range:
+            quote = quote_before(text, cit, starts)
+            if quote:
+                if auth.authority_id not in opinions:
+                    opinions[auth.authority_id] = page_source(auth.authority_id)
+                if opinions[auth.authority_id]:
+                    qf, qchecked = _check_quote(cit, auth, quote, opinions[auth.authority_id])
+                    report.quotes_checked += qchecked
+                    if qf:
+                        report.findings.append(qf)
 
     return report
 

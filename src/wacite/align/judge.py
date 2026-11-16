@@ -28,6 +28,13 @@ from wacite.models import (
     FindingType,
     ParsedCitation,
 )
+from wacite.normalize import normalize_cite
+from wacite.pages import page_map, page_texts, parse_pin
+
+# The pinned page is what a pin cite claims supports the proposition; a quotation or
+# sentence may run onto the next page, so its opening is included too.
+_PINNED_MAX_CHARS = 8000
+_NEXT_PAGE_CHARS = 1500
 
 JUDGE_SYSTEM_PROMPT = (
     "You are a meticulous legal cite-checker. You are given a PROPOSITION taken "
@@ -210,6 +217,25 @@ def _provider_usable(active: str | None, llm_url: str | None) -> bool:
     return False
 
 
+def pinned_page_passage(cit: ParsedCitation, auth: AuthorityRecord, text: str | None) -> corpus.Passage | None:
+    """The text of the page(s) a pin cite names, when the stored opinion marks that
+    reporter's pages and the pin falls inside them; None otherwise."""
+    pins = parse_pin(cit.pincite)
+    if not text or pins is None:
+        return None
+    pm = page_map(text, list(auth.parallel_cites) + [auth.canonical_cite])
+    if pm is None or pm.cite_normalized != normalize_cite(cit.lookup_key):
+        return None
+    start, end = pins
+    if start < pm.first_page or end > pm.last_page:
+        return None
+    pages = page_texts(text, pm)
+    body = " ".join(pages.get(p, "") for p in range(start, end + 1))
+    body += " " + pages.get(end + 1, "")[:_NEXT_PAGE_CHARS]
+    label = f"pinned page {cit.pincite}"
+    return corpus.Passage(text=" ".join(body.split())[:_PINNED_MAX_CHARS], section_heading=label)
+
+
 # --------------------------------------------------------------------------- #
 # Orchestration                                                                #
 # --------------------------------------------------------------------------- #
@@ -231,7 +257,8 @@ def align_citations(
     Returns advisory ``Finding``s (UNSUPPORTED_PROPOSITION / WEAK_SUPPORT) for
     the citations whose authority appears not to fully support the proposition.
     Citations the judge finds supported, and those with no retrievable text,
-    produce no finding.
+    produce no finding. A pin cite whose page the stored text marks is judged
+    against that page alone (since 2026-11-16), not the top-ranked passages.
     """
     resolved: list[tuple[ParsedCitation, AuthorityRecord, str]] = []
     for cit in citations:
@@ -257,11 +284,18 @@ def align_citations(
         except Exception:
             embeddings = None
 
-    # Fetch the most on-point passages for each cited authority.
+    # A pin cite is judged against the page it names, when the stored text marks
+    # that reporter's pages; otherwise against the most on-point passages.
     conn = corpus.connect(dsn)
     try:
         passages_per: list[list[corpus.Passage]] = []
-        for i, (_cit, auth, _prop) in enumerate(resolved):
+        for i, (cit, auth, _prop) in enumerate(resolved):
+            pinned = None
+            if cit.pincite:
+                pinned = pinned_page_passage(cit, auth, corpus.fetch_full_text(conn, auth.authority_id))
+            if pinned is not None:
+                passages_per.append([pinned])
+                continue
             qemb = embeddings[i] if embeddings is not None else None
             passages_per.append(
                 corpus.fetch_relevant_passages(conn, auth.authority_id, qemb, top_k)

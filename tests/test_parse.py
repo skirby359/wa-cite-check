@@ -21,6 +21,14 @@ def test_parses_full_case_cite_components():
     assert c.lookup_key == "199 Wn.2d 1"
 
 
+def test_supreme_court_reporter_forms_normalize_alike():
+    from wacite.normalize import normalize_cite
+
+    assert normalize_cite("501 U. S. 11") == normalize_cite("501 U.S. 11") == "501 u.s. 11"
+    assert normalize_cite("111 S.Ct. 2222") == normalize_cite("111 S. Ct. 2222") == "111 s. ct. 2222"
+    assert normalize_cite("115 L.Ed.2d 33") == "115 l. ed. 2d 33"
+
+
 def test_parallel_cite_not_swallowed_as_pincite():
     cits = parse_citations("State v. Smith, 199 Wn.2d 1, 502 P.3d 1 (2022).")
     c = [c for c in cits if c.kind == "case"][0]

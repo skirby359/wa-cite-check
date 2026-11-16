@@ -38,6 +38,7 @@ def stub_corpus(monkeypatch):
     """No embedding model, a dummy connection, and a canned supporting passage."""
     monkeypatch.setattr(judge, "_load_embed_model", lambda: None)
     monkeypatch.setattr(corpus, "connect", lambda dsn=None: _DummyConn())
+    monkeypatch.setattr(corpus, "fetch_full_text", lambda conn, aid: None)
     monkeypatch.setattr(
         corpus,
         "fetch_relevant_passages",
@@ -128,6 +129,25 @@ def test_align_off_by_default_keeps_phase1_only(index, monkeypatch, tmp_path):
     report = audit_document(_write(tmp_path), index)
     align_types = {FindingType.UNSUPPORTED_PROPOSITION, FindingType.WEAK_SUPPORT}
     assert not any(f.finding_type in align_types for f in report.findings)
+
+
+def test_pin_cite_is_judged_against_the_pinned_page(index, stub_corpus, monkeypatch, tmp_path):
+    # Smith's stored text marks Wn.2d pages 1-3; the brief pins page 2.
+    opinion = ("Opening facts on page one. *2 The State must prove every element beyond a reasonable "
+               "doubt, and the burden never shifts. *3 Unrelated discussion of costs on appeal.")
+    monkeypatch.setattr(corpus, "fetch_full_text", lambda conn, aid: opinion)
+    seen = {}
+
+    def chat(**k):
+        seen["msg"] = k["user_message"]
+        return "VERDICT: SUPPORTED\nREASON: The pinned page states the standard."
+
+    monkeypatch.setattr(judge, "_resolve_provider", lambda p, u: "ollama")
+    monkeypatch.setattr(judge, "_llm_chat", chat)
+    text = "The State must prove every element beyond a reasonable doubt. State v. Smith, 199 Wn.2d 1, 2 (2022)."
+    audit_document(_write(tmp_path, text), index, align=True, align_opts={"llm_url": "http://x"})
+    assert "[pinned page 2]" in seen["msg"] and "burden never shifts" in seen["msg"]
+    assert "presumed innocent" not in seen["msg"]  # the top-ranked passage was not used
 
 
 def test_extract_proposition_includes_lead_sentence(index):

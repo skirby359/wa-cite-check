@@ -17,23 +17,38 @@ from wacite.index.store import SCHEMA
 from wacite.normalize import normalize_cite
 from wacite.pages import page_map
 
+# A case's text with star pagination: the corpus's case_page_text (pagination recovered from
+# CourtListener's richer text fields, since 2026-11-16) where it has the case, else full_text.
+PAGINATED_TEXT_SQL = """COALESCE(
+    (SELECT string_agg(c.paginated_text, E'\\n\\n' ORDER BY c.type_rank, c.opinion_id)
+     FROM case_page_text c WHERE c.authority_id = a.authority_id),
+    a.full_text)"""
+
+
+def text_sql(conn) -> str:
+    """PAGINATED_TEXT_SQL, or plain full_text on a corpus without case_page_text."""
+    row = conn.execute("SELECT to_regclass('public.case_page_text') IS NOT NULL").fetchone()
+    has_table = row[0] if not isinstance(row, dict) else next(iter(row.values()))
+    return PAGINATED_TEXT_SQL if has_table else "a.full_text"
+
+
 # Pull only what the format/accuracy audit needs. Year prefers date_decided
 # (when the opinion issued) and falls back to date_filed. A case's text is read
 # only to find its page markers (wacite.pages); it is not stored in the index.
 _CORPUS_QUERY = """
     SELECT
-        authority_id::text                                   AS authority_id,
-        authority_type::text                                 AS authority_type,
-        canonical_cite,
-        canonical_cite_normalized,
-        display_title,
-        EXTRACT(YEAR FROM COALESCE(date_decided, date_filed))::int AS year,
-        court_name,
-        court_level,
-        authority_status::text                               AS authority_status,
-        parallel_cites,
-        CASE WHEN authority_type = 'case' THEN full_text END AS full_text
-    FROM authority
+        a.authority_id::text                                 AS authority_id,
+        a.authority_type::text                               AS authority_type,
+        a.canonical_cite,
+        a.canonical_cite_normalized,
+        a.display_title,
+        EXTRACT(YEAR FROM COALESCE(a.date_decided, a.date_filed))::int AS year,
+        a.court_name,
+        a.court_level,
+        a.authority_status::text                             AS authority_status,
+        a.parallel_cites,
+        CASE WHEN a.authority_type = 'case' THEN {text} END  AS full_text
+    FROM authority a
 """
 
 
@@ -141,7 +156,8 @@ def build_from_postgres(out_path: str | Path, dsn: str | None = None) -> tuple[i
 
     dsn = dsn or default_dsn()
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        query = _CORPUS_QUERY.format(text=text_sql(conn))
         with conn.cursor(name="wacite_build") as cur:
             cur.itersize = 2000
-            cur.execute(_CORPUS_QUERY)
+            cur.execute(query)
             return write_index(out_path, with_page_ranges(cur))

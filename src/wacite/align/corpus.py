@@ -35,6 +35,17 @@ def connect(dsn: str | None = None):
     return psycopg.connect(dsn or default_dsn())
 
 
+def fetch_full_text(conn, authority_id: str) -> str | None:
+    """The stored text of one authority (for the pinned-page excerpt), with recovered star
+    pagination where the corpus has it."""
+    from wacite.index.build import text_sql
+
+    row = conn.execute(
+        f"SELECT {text_sql(conn)} FROM authority a WHERE a.authority_id = %s::uuid", (str(authority_id),)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def _vec_literal(embedding) -> str:
     """Format an embedding vector as a pgvector/halfvec text literal."""
     return "[" + ",".join(f"{float(v):.8f}" for v in embedding) + "]"

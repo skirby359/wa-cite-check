@@ -38,6 +38,11 @@ _REPORTER_CANON: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bf\.?\s*4th\b"), "f.4th"),
     (re.compile(r"\bf\.?\s*3d\b"), "f.3d"),
     (re.compile(r"\bf\.?\s*2d\b"), "f.2d"),
+    # U.S. Supreme Court, as CourtListener stores them: "U.S.", "S. Ct.", "L. Ed. 2d".
+    (re.compile(r"\bu\.\s?s\.(?=\s+\d)"), "u.s."),
+    (re.compile(r"\bs\.\s?ct\."), "s. ct."),
+    (re.compile(r"\bl\.\s?ed\.\s?2d\b"), "l. ed. 2d"),
+    (re.compile(r"\bl\.\s?ed\.(?!\s?2d)"), "l. ed."),
 ]
 
 

@@ -25,7 +25,9 @@ read once to build a small portable SQLite index; all checking happens against t
 **Phase 2 (optional) — substantive alignment.** With `--align`, each citation that resolves is
 checked for *substance*: does the cited authority actually support the proposition it's offered
 for? An LLM judge (local **Ollama** by default, or **Claude**) reads the proposition alongside the
-most on-point passages and returns a verdict. All Phase-2 findings are advisory.
+most on-point passages and returns a verdict. A pin cite whose page the stored opinion marks is
+judged against that page alone, since the pin claims the support is there. All Phase-2 findings
+are advisory.
 
 ## Try the example
 
@@ -94,7 +96,7 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
 | `NEGATIVE_TREATMENT` | warning | Authority is overruled / repealed / abrogated / etc. |
 | `PIN_OUT_OF_RANGE` | warning | The pin page is outside the opinion's pages, per the page markers in the stored text. |
 | `QUOTE_ELSEWHERE` | warning | *(--quotes)* The quotation before the cite starts on another page than the pin. |
-| `QUOTE_NOT_FOUND` | warning | *(--quotes)* The quoted words (or part of them) aren't in the stored opinion text. |
+| `QUOTE_NOT_FOUND` | warning | *(--quotes)* The quoted words (or part of them) aren't in the stored opinion text. Checked even when the pinned page can't be located (no pin, no page markers): then the whole opinion is searched. |
 | `PIN_NOT_VERIFIED` | info | Pin page can't be checked: the stored text has no page markers, or marks another reporter's pages. |
 | `OUT_OF_SCOPE` | info | Cite to a court the corpus doesn't hold (U.S. Supreme Court, another circuit, district or state); not checked. |
 | `UNSUPPORTED_PROPOSITION` | warning | *(--align)* The judge found the authority doesn't support the proposition. Advisory. |

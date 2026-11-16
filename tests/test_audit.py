@@ -152,6 +152,30 @@ def test_quote_on_another_page_is_flagged(index):
     assert f and "page 2" in f[0].message
 
 
+JONES_TEXT = "The trial court erred in admitting the confession without a CrR 3.5 hearing. Reversed."
+
+
+def test_quote_is_checked_anywhere_when_the_page_cannot_be_located(index):
+    def audit(text):
+        return audit_citations(parse_citations(text), index, text=text,
+                               page_source=lambda aid: {"a-smith": OPINION, "a-jones": JONES_TEXT}.get(aid))
+    # Jones's text has no page markers: the quotation is still looked for in the opinion.
+    ok = audit("“erred in admitting the confession without a CrR 3.5 hearing” State v. Jones, 150 Wn.2d 50, 55 (2003).")
+    assert ok.quotes_checked == 1 and FindingType.QUOTE_NOT_FOUND not in _types(ok)
+    bad = audit("“erred in admitting the statement without any hearing at all” State v. Jones, 150 Wn.2d 50, 55 (2003).")
+    f = [f for f in bad.findings if f.finding_type is FindingType.QUOTE_NOT_FOUND]
+    assert f and "page not checked" in f[0].message
+    # A quotation with no pin at all is checked the same way.
+    nopin = audit("“a warrantless search of the vehicle was unlawful” State v. Smith, 199 Wn.2d 1 (2022).")
+    assert nopin.quotes_checked == 1 and nopin.findings == []
+
+
+def test_no_quote_check_after_a_pin_outside_the_pages(index):
+    report = _audit_quotes("“a warrantless search of the vehicle” State v. Smith, 199 Wn.2d 1, 45 (2022).", index)
+    assert [f.finding_type for f in report.findings] == [FindingType.PIN_OUT_OF_RANGE]
+    assert report.quotes_checked == 0
+
+
 def test_misquote_is_flagged_and_no_quote_means_no_quote_check(index):
     report = _audit_quotes("“a warrantless seizure of the truck was lawful” State v. Smith, 199 Wn.2d 1, 2 (2022).", index)
     assert FindingType.QUOTE_NOT_FOUND in _types(report)

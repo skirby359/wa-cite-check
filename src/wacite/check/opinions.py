@@ -19,10 +19,12 @@ class CorpusText:
     def __call__(self, authority_id: str) -> str | None:
         if self._conn is None:
             from wacite.align.corpus import connect
+            from wacite.index.build import text_sql
 
             self._conn = connect(self._dsn)
+            self._text = text_sql(self._conn)
         row = self._conn.execute(
-            "SELECT full_text FROM authority WHERE authority_id = %s::uuid", (authority_id,)
+            f"SELECT {self._text} FROM authority a WHERE a.authority_id = %s::uuid", (authority_id,)
         ).fetchone()
         return row[0] if row else None
 
