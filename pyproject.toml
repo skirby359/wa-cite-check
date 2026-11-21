@@ -7,7 +7,7 @@ name = "wa-cite-check"
 version = "0.1.0"
 description = "Standalone Washington legal citation checker (format/accuracy audit) over the wa-legal-ai corpus"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11.5"
 dependencies = [
     "click>=8.1",
     "rich>=13.0",
