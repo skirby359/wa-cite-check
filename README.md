@@ -17,7 +17,7 @@ extracts every citation, confirms each one exists in the corpus, and cross-check
 **case name**, **year**, **parallel cite**, and **authority status** (overruled / repealed / etc.).
 **Pin cites** are checked against the opinion's own page breaks (the star pagination in the stored
 text): a pin outside the opinion's pages is flagged, and with `--quotes` a quotation is looked for
-on the pinned page. A cite to a court the corpus doesn't hold, such as the U.S. Supreme Court, is
+on the pinned page. A cite to a court the corpus doesn't hold, such as another federal circuit, is
 reported as out of scope rather than as an error. It runs **fully offline**: the corpus database is
 read once to build a small portable SQLite index; all checking happens against that file (only
 `--quotes` and `--align` read the corpus at check time).
@@ -98,7 +98,7 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
 | `QUOTE_ELSEWHERE` | warning | *(--quotes)* The quotation before the cite starts on another page than the pin. |
 | `QUOTE_NOT_FOUND` | warning | *(--quotes)* The quoted words (or part of them) aren't in the stored opinion text. Checked even when the pinned page can't be located (no pin, no page markers): then the whole opinion is searched. |
 | `PIN_NOT_VERIFIED` | info | Pin page can't be checked: the stored text has no page markers, or marks another reporter's pages. |
-| `OUT_OF_SCOPE` | info | Cite to a court the corpus doesn't hold (U.S. Supreme Court, another circuit, district or state); not checked. |
+| `OUT_OF_SCOPE` | info | Cite to a court the corpus doesn't hold (another circuit, district or state), or a U.S. Supreme Court cite that isn't one of the Court's merits decisions in the corpus (an order, a cert denial, the newest decisions); not checked. |
 | `UNSUPPORTED_PROPOSITION` | warning | *(--align)* The judge found the authority doesn't support the proposition. Advisory. |
 | `WEAK_SUPPORT` | info | *(--align)* The judge found only partial/uncertain support. Advisory. |
 
@@ -117,7 +117,8 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
   choose by, the row whose text carries that reporter's page markers comes first, then the row
   whose canonical cite it is.
 - **Coverage:** Washington Supreme Court and Court of Appeals, the 9th Circuit (Washington-related
-  cases only), W.D. and E.D. Wash. No U.S. Supreme Court opinions. A not-found 9th Circuit cite may
+  cases only), W.D. and E.D. Wash., and the U.S. Supreme Court's merits decisions (since November
+  2026; not its orders or cert denials). A not-found 9th Circuit cite may
   just be outside that coverage; the finding says so.
 - **Scanned PDFs** need OCR first; only text-based PDFs are read.
 - Reporter folding handles common WA / Pacific / Federal variants (`Wn.2d` ⇄ `Wash. 2d`); exotic reporters may miss.
