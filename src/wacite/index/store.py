@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from wacite.models import AuthorityRecord
-from wacite.normalize import normalize_cite
+from wacite.normalize import names_match, normalize_cite
 
 # SQLite schema for the portable index (kept in sync with index/build.py).
 SCHEMA = """
@@ -29,9 +29,16 @@ CREATE TABLE IF NOT EXISTS authority (
     parallel_cites            TEXT          -- JSON array
 );
 
+-- Every authority that lists a cite (since 2026-11-21; before, only the first row the
+-- build read, which was arbitrary). A table page is shared by many decisions, and a
+-- cite stored on the wrong row is shared too. rank orders the holders when the case
+-- name can't choose: 0 the row's text carries star pages for this cite, 1 its
+-- canonical cite, 2 a parallel cite; then authority_id.
 CREATE TABLE IF NOT EXISTS cite_lookup (
-    cite_normalized TEXT PRIMARY KEY,
-    authority_id    TEXT NOT NULL
+    cite_normalized TEXT NOT NULL,
+    authority_id    TEXT NOT NULL,
+    rank            INTEGER NOT NULL DEFAULT 2,
+    PRIMARY KEY (cite_normalized, authority_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lookup_aid ON cite_lookup(authority_id);
@@ -59,6 +66,9 @@ class CiteIndex:
             )
         self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
         self._conn.row_factory = sqlite3.Row
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(cite_lookup)")}
+        # An index built before 2026-11-21 holds one row per cite and no rank.
+        self._order = " ORDER BY rank, authority_id" if "rank" in cols else ""
 
     def close(self) -> None:
         self._conn.close()
@@ -69,14 +79,19 @@ class CiteIndex:
     def __exit__(self, *exc) -> None:
         self.close()
 
+    def candidates(self, cite: str) -> list[str]:
+        """Every authority_id that lists this citation, best first (see SCHEMA)."""
+        rows = self._conn.execute(
+            "SELECT authority_id FROM cite_lookup WHERE cite_normalized = ?" + self._order,
+            (normalize_cite(cite),),
+        ).fetchall()
+        return [r["authority_id"] for r in rows]
+
     def resolve(self, cite: str) -> str | None:
-        """Return the authority_id for a citation string, or None."""
-        norm = normalize_cite(cite)
-        row = self._conn.execute(
-            "SELECT authority_id FROM cite_lookup WHERE cite_normalized = ?",
-            (norm,),
-        ).fetchone()
-        return row["authority_id"] if row else None
+        """Return the authority_id for a citation string, or None. When several
+        authorities list it, the first by rank (see ``lookup_by_cite`` to choose by name)."""
+        ids = self.candidates(cite)
+        return ids[0] if ids else None
 
     def get_authority(self, authority_id: str) -> AuthorityRecord | None:
         """Return the full authority record for an id."""
@@ -87,10 +102,24 @@ class CiteIndex:
             return None
         return self._row_to_record(row)
 
-    def lookup_by_cite(self, cite: str) -> AuthorityRecord | None:
-        """Resolve a cite string straight to its authority record."""
-        aid = self.resolve(cite)
-        return self.get_authority(aid) if aid else None
+    def lookup_by_cite(self, cite: str, name: str | None = None) -> AuthorityRecord | None:
+        """Resolve a cite string straight to its authority record.
+
+        When several authorities list the cite, the first whose caption fits ``name``
+        (the case name the brief gives) wins, else the first by rank. The record's
+        ``shared_with`` holds the other holders' captions.
+        """
+        ids = self.candidates(cite)
+        if not ids:
+            return None
+        records = [r for r in (self.get_authority(a) for a in ids) if r is not None]
+        if not records:
+            return None
+        pick = records[0]
+        if name and len(records) > 1:
+            pick = next((r for r in records if r.display_title and names_match(name, r.display_title)), pick)
+        pick.shared_with = [r.display_title or r.canonical_cite for r in records if r is not pick]
+        return pick
 
     def page_range(self, authority_id: str) -> tuple[str, int, int] | None:
         """(marked reporter cite, first page, last page), or None when the stored
@@ -118,7 +147,7 @@ class CiteIndex:
         if not prefix:
             return []
         rows = self._conn.execute(
-            "SELECT cite_normalized FROM cite_lookup "
+            "SELECT DISTINCT cite_normalized FROM cite_lookup "
             "WHERE cite_normalized LIKE ? LIMIT ?",
             (prefix + "%", limit),
         ).fetchall()

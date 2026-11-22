@@ -25,6 +25,14 @@ STAR = re.compile(r"(?<![\w*])\*(\d{1,5})(?![\d,])")
 _CITE = re.compile(r"^\s*(\d+)\s+(.+?)\s+(\d+)\s*$")
 _MAX_PAGES = 600  # page markers further than this past the first page are noise
 _MAX_JUMP = 5     # a marker more than this past the previous one is noise
+# The first marker may be this far past the first page: an official reporter's syllabus,
+# headnotes and counsel can fill several pages before the opinion's text begins (172 Wn.2d
+# 702's first marker is *709). Until 2026-11-21 it was _MAX_JUMP.
+_FIRST_GAP = 25
+# A separate opinion stored after the lead one may restart lower ("... *728" then "*711
+# *712 ..."). A run of at least this many markers outside the lead's chain is kept as its
+# own pages; shorter ones are noise (a footnote, a cross-reference).
+_MIN_RUN = 3
 
 
 @dataclass
@@ -35,22 +43,83 @@ class PageMap:
     cite_normalized: str            # normalize_cite(cite)
     first_page: int
     last_page: int
-    breaks: list[tuple[int, int]]   # (page, char offset where it starts), page > first_page
+    # (page, char offset where it starts), in text order, page > first_page. Pages
+    # increase except where a separate opinion's pages start over (see _MIN_RUN).
+    breaks: list[tuple[int, int]]
+
+
+def _chain(marks: list[tuple[int, int]], first: int) -> list[int]:
+    """Indexes into ``marks`` of the longest run of increasing pages, each at most
+    _MAX_JUMP past the one before, starting at most _FIRST_GAP past ``first``.
+    Markers in between that don't fit are skipped. Ties go to the run that ends
+    earliest in the text (the lead opinion's)."""
+    length: list[int] = [0] * len(marks)
+    parent: list[int] = [-1] * len(marks)
+    best_at: dict[int, int] = {}  # page -> index of the longest run ending on it so far
+    top = -1
+    for i, (page, _off) in enumerate(marks):
+        if not first < page <= first + _MAX_PAGES:
+            continue
+        n, p = (1, -1) if page <= first + _FIRST_GAP else (0, -1)
+        for prev in range(page - _MAX_JUMP, page):
+            j = best_at.get(prev)
+            if j is not None and length[j] + 1 > n:
+                n, p = length[j] + 1, j
+        if n == 0:
+            continue
+        length[i], parent[i] = n, p
+        if page not in best_at or n > length[best_at[page]]:
+            best_at[page] = i
+        if top < 0 or n > length[top]:
+            top = i
+    out: list[int] = []
+    while top >= 0:
+        out.append(top)
+        top = parent[top]
+    return out[::-1]
+
+
+def _runs(marks: list[tuple[int, int]], skip: set[int], first: int) -> list[int]:
+    """Indexes of markers outside ``skip`` that form runs of at least _MIN_RUN
+    increasing pages (a separate opinion whose pages start over)."""
+    kept: list[int] = []
+    run: list[int] = []
+    for i, (page, _off) in enumerate(marks):
+        if i in skip or not first < page <= first + _MAX_PAGES:
+            continue
+        if run and 0 < page - marks[run[-1]][0] <= _MAX_JUMP:
+            run.append(i)
+            continue
+        if len(run) >= _MIN_RUN:
+            kept.extend(run)
+        run = [i]
+    if len(run) >= _MIN_RUN:
+        kept.extend(run)
+    return kept
 
 
 def page_map(text: str | None, cites: list[str]) -> PageMap | None:
     """Match the star markers in ``text`` to one of the opinion's reporter cites.
 
-    The cite whose page range holds the most markers wins. Markers are kept in
-    increasing order; an out-of-order or far-jumping number is treated as noise
-    (a footnote, a quoted cite). Returns None when no reporter cite has a marker.
+    For each cite, the longest run of increasing markers (``_chain``), plus any
+    other runs of at least _MIN_RUN markers (``_runs``): a separate opinion stored
+    after the lead one can start over at a lower page. Any other marker is noise
+    (a footnote, a cross-reference), except that one up to _MAX_JUMP pages past the
+    last page kept extends the last page ("*386 *389 *387 *388": the run keeps 387
+    and 388, and 389 is the last page). The cite with the longest run wins (runs of
+    other cites don't count: as runs, 476 U.S. 593's markers also fit 90 L. Ed. 2d
+    569). On a tie, a cite whose first marker is at most _MAX_JUMP pages past its first
+    page beats one further off, since one reporter's markers can fall inside another's
+    range (60 Wn.2d 775's *776 is also 33 pages into 375 P.2d 743); otherwise the cite
+    listed first wins (317 U.S. 102 over 63 S. Ct. 103, whose ranges differ by a page).
+    Returns None when no reporter cite has a marker.
     """
     if not text:
         return None
     marks = [(int(m.group(1)), m.start()) for m in STAR.finditer(text)]
     if not marks:
         return None
-    best: tuple[str, int, list[tuple[int, int]]] | None = None
+    best: tuple[tuple[int, int], str, int, list[int]] | None = None
     for cite in cites or []:
         if not cite or "LEXIS" in cite or "WL" in cite:
             continue
@@ -58,19 +127,24 @@ def page_map(text: str | None, cites: list[str]) -> PageMap | None:
         if not m:
             continue
         first = int(m.group(3))
-        seq: list[tuple[int, int]] = []
-        last = first
-        for page, off in marks:
-            if last < page <= last + _MAX_JUMP and page <= first + _MAX_PAGES:
-                seq.append((page, off))
-                last = page
-        if seq and (best is None or len(seq) > len(best[2])):
-            best = (cite.strip(), first, seq)
+        chain = _chain(marks, first)
+        if not chain:
+            continue
+        score = (len(chain), marks[chain[0]][0] - first <= _MAX_JUMP)
+        if best is None or score > best[0]:
+            best = (score, cite.strip(), first, chain)
     if best is None:
         return None
-    cite, first, seq = best
+    _score, cite, first, chain = best
+    kept = sorted(chain + _runs(marks, set(chain), first))
+    seq = [marks[i] for i in kept]
+    last = max(p for p, _ in seq)
+    taken = set(kept)
+    for page in sorted(p for i, (p, _) in enumerate(marks) if i not in taken):
+        if last < page <= last + _MAX_JUMP:
+            last = page
     return PageMap(cite=cite, cite_normalized=normalize_cite(cite), first_page=first,
-                   last_page=seq[-1][0], breaks=seq)
+                   last_page=last, breaks=seq)
 
 
 def page_texts(text: str, pm: PageMap) -> dict[int, str]:

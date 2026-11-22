@@ -262,7 +262,7 @@ def align_citations(
     """
     resolved: list[tuple[ParsedCitation, AuthorityRecord, str]] = []
     for cit in citations:
-        auth = index.lookup_by_cite(cit.lookup_key)
+        auth = index.lookup_by_cite(cit.lookup_key, name=cit.name if cit.kind == "case" else None)
         if auth is None:
             continue
         prop = extract_proposition(text, cit)

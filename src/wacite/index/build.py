@@ -70,7 +70,7 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
     authority_status, parallel_cites (list[str] | None); optionally
     page_range: (marked reporter cite, first page, last page).
 
-    Returns (authority_count, cite_lookup_count). Reused by tests to build
+    Returns (authority_count, distinct cite keys). Reused by tests to build
     fixture indexes without PostgreSQL. ``rows`` may be a generator: it is read
     once, row by row.
     """
@@ -107,27 +107,31 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
                 ),
             )
             n_auth += 1
+            marked = None
             if r.get("page_range"):
                 cite, first, last = r["page_range"]
+                marked = normalize_cite(cite)
                 conn.execute(
                     "INSERT OR REPLACE INTO page_range (authority_id, cite_normalized, first_page, last_page) "
                     "VALUES (?,?,?,?)",
-                    (r["authority_id"], normalize_cite(cite), first, last),
+                    (r["authority_id"], marked, first, last),
                 )
 
-            # Index the canonical cite plus every parallel reporter cite.
-            keys = [r["canonical_cite_normalized"]]
+            # Index the canonical cite plus every parallel reporter cite. A cite another
+            # row also lists gets a second row; rank orders them (see store.SCHEMA).
+            canonical = r["canonical_cite_normalized"]
+            keys = [canonical]
             keys.extend(normalize_cite(pc) for pc in parallel)
-            for key in keys:
-                if not key or key in seen_keys:
-                    continue
-                seen_keys.add(key)
+            for key in dict.fromkeys(k for k in keys if k):
+                rank = 0 if key == marked else 1 if key == canonical else 2
                 conn.execute(
                     "INSERT OR IGNORE INTO cite_lookup "
-                    "(cite_normalized, authority_id) VALUES (?, ?)",
-                    (key, r["authority_id"]),
+                    "(cite_normalized, authority_id, rank) VALUES (?, ?, ?)",
+                    (key, r["authority_id"], rank),
                 )
-                n_lookup += 1
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    n_lookup += 1
         conn.commit()
         return n_auth, n_lookup
     finally:

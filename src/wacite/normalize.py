@@ -78,3 +78,22 @@ def normalize_case_name(name: str) -> str:
     name = _WS.sub(" ", name).strip().lower()
     name = name.replace(".", "").replace(",", "")
     return name
+
+
+def names_match(brief_name: str, stored_title: str) -> bool:
+    """Whether a case name written in a brief fits a stored caption.
+
+    Exact, or contained either way on whole words (short names, "et al."): "State v.
+    Smith" must not accept "State v. Smithson". Or every word of the brief's name is in
+    the caption: briefs shorten long captions ("United States v. Gray" for "United States
+    v. The Honorable William P. Gray, United States District Judge"). True when either
+    name is empty after normalizing, since there is nothing to compare.
+    """
+    got = normalize_case_name(brief_name)
+    want = normalize_case_name(stored_title)
+    if not got or not want:
+        return True
+    if got == want or f" {got} " in f" {want} " or f" {want} " in f" {got} ":
+        return True
+    got_words = {w for w in got.split() if w not in ("v", "vs")}
+    return bool(got_words) and got_words <= set(want.split())

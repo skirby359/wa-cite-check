@@ -92,6 +92,9 @@ class AuthorityRecord:
     court_level: int | None
     authority_status: str
     parallel_cites: list[str] = field(default_factory=list)
+    # Captions of the other authorities the looked-up cite is also listed for (a
+    # table page several decisions share, or a cite stored on the wrong row).
+    shared_with: list[str] = field(default_factory=list)
 
 
 @dataclass

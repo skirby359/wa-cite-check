@@ -32,7 +32,7 @@ from wacite.models import (
     FINDING_SEVERITY,
     ParsedCitation,
 )
-from wacite.normalize import normalize_case_name, normalize_cite
+from wacite.normalize import names_match, normalize_cite
 from wacite.pages import page_map, page_texts, parse_pin, quote_pages
 from wacite.parse.citations import parse_citations
 from wacite.parse.document import extract_text
@@ -84,25 +84,18 @@ def _check_name(cit: ParsedCitation, auth: AuthorityRecord) -> Finding | None:
     """Check 2: the case name written matches the stored display_title."""
     if cit.kind != "case" or not cit.name or not auth.display_title:
         return None
-    got = normalize_case_name(cit.name)
-    want = normalize_case_name(auth.display_title)
-    if not got or not want:
+    if names_match(cit.name, auth.display_title):
         return None
-    # Accept exact match or a containment either way (short names, "et al."), on whole
-    # words: "State v. Smith" must not accept "State v. Smithson".
-    if got == want or f" {got} " in f" {want} " or f" {want} " in f" {got} ":
-        return None
-    # Accept a name whose every word is in the stored caption: briefs shorten long
-    # captions ("United States v. Gray" for "United States v. The Honorable William
-    # P. Gray, United States District Judge", a mandamus caption).
-    got_words = {w for w in got.split() if w not in ("v", "vs")}
-    if got_words and got_words <= set(want.split()):
-        return None
+    also = ""
+    if auth.shared_with:
+        others = "; ".join(f"'{t}'" for t in auth.shared_with[:3])
+        more = f" and {len(auth.shared_with) - 3} more" if len(auth.shared_with) > 3 else ""
+        also = f" (the corpus also lists this cite for {others}{more})"
     return _finding(
         cit,
         FindingType.NAME_MISMATCH,
         f"cite resolves to '{auth.display_title}' but the brief names it "
-        f"'{cit.name}'",
+        f"'{cit.name}'{also}",
         auth,
     )
 
@@ -126,8 +119,8 @@ def _check_parallel(cit: ParsedCitation, auth: AuthorityRecord,
                     index: CiteIndex) -> Finding | None:
     """Check 4: every parallel reporter cite resolves to the same authority."""
     for pc in cit.parallel:
-        other = index.resolve(pc)
-        if other and other != auth.authority_id:
+        holders = index.candidates(pc)
+        if holders and auth.authority_id not in holders:
             return _finding(
                 cit,
                 FindingType.PARALLEL_MISMATCH,
@@ -283,7 +276,7 @@ def audit_citations(
     starts = [c.start for c in citations]
 
     for cit in citations:
-        auth = index.lookup_by_cite(cit.lookup_key)
+        auth = index.lookup_by_cite(cit.lookup_key, name=cit.name if cit.kind == "case" else None)
 
         if auth is None:
             scope = _out_of_scope(cit)

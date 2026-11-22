@@ -90,7 +90,7 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
 | Finding | Severity | Meaning |
 |---|---|---|
 | `NOT_FOUND` | error | Citation doesn't resolve to any corpus authority (typo or fabricated). |
-| `NAME_MISMATCH` | error | Reporter cite resolves, but the party name attached is wrong. |
+| `NAME_MISMATCH` | error | Reporter cite resolves, but the party name attached is wrong. When several decisions list the cite (a table page), the one whose caption fits the name is used; if none fits, the finding names the others. |
 | `YEAR_MISMATCH` | error | Parenthetical year disagrees with the corpus. |
 | `PARALLEL_MISMATCH` | error | The given parallel reporters point to different authorities. |
 | `NEGATIVE_TREATMENT` | warning | Authority is overruled / repealed / abrogated / etc. |
@@ -108,7 +108,14 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
   usually the official one (Wash. 2d, Wash. App., F.3d), and only where the text has markers: in a
   November 2026 sample, 98% of Washington Supreme Court opinions, 90% of Court of Appeals, 54% of
   9th Circuit, nearly all district court opinions. Pin and quote findings are warnings: a stored
-  text can be incomplete (a missing dissent, say).
+  text can be incomplete (a missing dissent, say). The opinion's text may start several pages after
+  its first page (an official reporter's syllabus and headnotes), and a separate opinion stored after
+  the lead one may start over at a lower page; both are mapped. A quotation that crosses a page
+  break inside such a separate opinion can be missed.
+- **Shared cites:** a table page (`158 Wn.2d 1024`) lists many decisions, and the corpus sometimes
+  stores a cite on the wrong row. The index keeps every row that lists a cite; with no case name to
+  choose by, the row whose text carries that reporter's page markers comes first, then the row
+  whose canonical cite it is.
 - **Coverage:** Washington Supreme Court and Court of Appeals, the 9th Circuit (Washington-related
   cases only), W.D. and E.D. Wash. No U.S. Supreme Court opinions. A not-found 9th Circuit cite may
   just be outside that coverage; the finding says so.
