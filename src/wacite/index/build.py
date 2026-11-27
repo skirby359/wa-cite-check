@@ -15,14 +15,25 @@ from typing import Iterable, Iterator
 
 from wacite.index.store import SCHEMA
 from wacite.normalize import normalize_cite
-from wacite.pages import page_map
+from wacite.pages import TEXT_SEP, page_maps
 
-# A case's text with star pagination: the corpus's case_page_text (pagination recovered from
-# CourtListener's richer text fields, since 2026-11-16) where it has the case, else full_text.
-PAGINATED_TEXT_SQL = """COALESCE(
-    (SELECT string_agg(c.paginated_text, E'\\n\\n' ORDER BY c.type_rank, c.opinion_id)
-     FROM case_page_text c WHERE c.authority_id = a.authority_id),
-    a.full_text)"""
+# A case's stored texts, joined with wacite.pages.TEXT_SEP, then full_text:
+# - the corpus's case_page_text recovered from CourtListener's richer fields (since
+#   2026-11-16), all of a case's opinions as one text, lead first, as before: a separate
+#   opinion's pages continue the lead's;
+# - each other case_page_text row on its own: the text of a merged copy of the decision
+#   (source_field merged_full_text), which may mark another reporter (official vs Pacific).
+# Until 2026-11-25 case_page_text, where present, replaced full_text, so only one
+# reporter's pages were known per case.
+_SQL_SEP = "E'" + TEXT_SEP.encode("unicode_escape").decode("ascii") + "'"
+PAGINATED_TEXT_SQL = f"""NULLIF(CONCAT_WS({_SQL_SEP},
+    (SELECT string_agg(g.t, {_SQL_SEP} ORDER BY g.r, g.o)
+     FROM (SELECT string_agg(c.paginated_text, E'\\n\\n' ORDER BY c.type_rank, c.opinion_id) AS t,
+                  min(c.type_rank) AS r, min(c.opinion_id) AS o
+           FROM case_page_text c WHERE c.authority_id = a.authority_id
+           GROUP BY CASE WHEN c.source_field LIKE 'html%%' OR c.source_field LIKE 'xml%%'
+                         THEN '' ELSE c.opinion_id::text END) g),
+    a.full_text), '')"""
 
 
 def text_sql(conn) -> str:
@@ -68,7 +79,8 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
     Each row dict needs: authority_id, authority_type, canonical_cite,
     canonical_cite_normalized, display_title, year, court_name, court_level,
     authority_status, parallel_cites (list[str] | None); optionally
-    page_range: (marked reporter cite, first page, last page).
+    page_ranges: [(marked reporter cite, first page, last page), ...], one per
+    reporter (or page_range: one such tuple).
 
     Returns (authority_count, distinct cite keys). Reused by tests to build
     fixture indexes without PostgreSQL. ``rows`` may be a generator: it is read
@@ -107,14 +119,17 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
                 ),
             )
             n_auth += 1
-            marked = None
-            if r.get("page_range"):
-                cite, first, last = r["page_range"]
-                marked = normalize_cite(cite)
+            marked: set[str] = set()
+            ranges = list(r.get("page_ranges") or ([r["page_range"]] if r.get("page_range") else []))
+            for cite, first, last in ranges:
+                key = normalize_cite(cite)
+                if key in marked:
+                    continue  # the first range given for a reporter wins
+                marked.add(key)
                 conn.execute(
                     "INSERT OR REPLACE INTO page_range (authority_id, cite_normalized, first_page, last_page) "
                     "VALUES (?,?,?,?)",
-                    (r["authority_id"], marked, first, last),
+                    (r["authority_id"], key, first, last),
                 )
 
             # Index the canonical cite plus every parallel reporter cite. A cite another
@@ -123,7 +138,7 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
             keys = [canonical]
             keys.extend(normalize_cite(pc) for pc in parallel)
             for key in dict.fromkeys(k for k in keys if k):
-                rank = 0 if key == marked else 1 if key == canonical else 2
+                rank = 0 if key in marked else 1 if key == canonical else 2
                 conn.execute(
                     "INSERT OR IGNORE INTO cite_lookup "
                     "(cite_normalized, authority_id, rank) VALUES (?, ?, ?)",
@@ -139,13 +154,15 @@ def write_index(out_path: str | Path, rows: Iterable[dict]) -> tuple[int, int]:
 
 
 def with_page_ranges(rows: Iterable[dict]) -> Iterator[dict]:
-    """Add each case's page_range from its text's star markers, then drop the text."""
+    """Add each case's page_ranges, one per reporter its stored texts mark (``page_maps``),
+    then drop the text."""
     for r in rows:
         text = r.pop("full_text", None)
         if text and r.get("authority_type") == "case":
-            pm = page_map(text, list(r.get("parallel_cites") or []) + [r.get("canonical_cite") or ""])
-            if pm:
-                r["page_range"] = (pm.cite, pm.first_page, pm.last_page)
+            cites = list(r.get("parallel_cites") or []) + [r.get("canonical_cite") or ""]
+            ranges = [(pm.cite, pm.first_page, pm.last_page) for pm, _seg in page_maps(text, cites)]
+            if ranges:
+                r["page_ranges"] = ranges
         yield r
 
 

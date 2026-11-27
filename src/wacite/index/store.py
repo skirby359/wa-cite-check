@@ -43,13 +43,15 @@ CREATE TABLE IF NOT EXISTS cite_lookup (
 
 CREATE INDEX IF NOT EXISTS idx_lookup_aid ON cite_lookup(authority_id);
 
--- Pages of the one reporter whose star pagination the stored opinion text marks
--- (see wacite.pages). Cases only; absent when the text has no markers.
+-- Pages of each reporter whose star pagination a stored text of the case marks (see
+-- wacite.pages.page_maps). Cases only; none when no text has markers. Until 2026-11-25
+-- one row per case (PRIMARY KEY authority_id); CiteIndex reads both.
 CREATE TABLE IF NOT EXISTS page_range (
-    authority_id    TEXT PRIMARY KEY,
+    authority_id    TEXT NOT NULL,
     cite_normalized TEXT NOT NULL,
     first_page      INTEGER NOT NULL,
-    last_page       INTEGER NOT NULL
+    last_page       INTEGER NOT NULL,
+    PRIMARY KEY (authority_id, cite_normalized)
 );
 """
 
@@ -121,17 +123,27 @@ class CiteIndex:
         pick.shared_with = [r.display_title or r.canonical_cite for r in records if r is not pick]
         return pick
 
-    def page_range(self, authority_id: str) -> tuple[str, int, int] | None:
-        """(marked reporter cite, first page, last page), or None when the stored
-        text has no page markers or the index predates page ranges."""
+    def page_ranges(self, authority_id: str) -> list[tuple[str, int, int]]:
+        """[(marked reporter cite, first page, last page), ...], one per reporter whose
+        pages a stored text marks; [] when none does or the index predates page ranges."""
         try:
-            row = self._conn.execute(
-                "SELECT cite_normalized, first_page, last_page FROM page_range WHERE authority_id = ?",
+            rows = self._conn.execute(
+                "SELECT cite_normalized, first_page, last_page FROM page_range WHERE authority_id = ? "
+                "ORDER BY rowid",
                 (authority_id,),
-            ).fetchone()
+            ).fetchall()
         except sqlite3.OperationalError:  # index built before page_range existed
-            return None
-        return (row["cite_normalized"], row["first_page"], row["last_page"]) if row else None
+            return []
+        return [(r["cite_normalized"], r["first_page"], r["last_page"]) for r in rows]
+
+    def page_range(self, authority_id: str, cite: str | None = None) -> tuple[str, int, int] | None:
+        """With ``cite``, that reporter's (cite, first page, last page), or None when no
+        stored text marks its pages. Without, the first range stored for the case."""
+        ranges = self.page_ranges(authority_id)
+        if cite is None:
+            return ranges[0] if ranges else None
+        want = normalize_cite(cite)
+        return next((r for r in ranges if r[0] == want), None)
 
     def count_authorities(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM authority").fetchone()[0]

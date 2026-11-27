@@ -10,6 +10,12 @@ with a reporter cite: Washington Supreme Court 98%, Court of Appeals 90%,
 Both the index build (first/last page per opinion) and the quote check (text of
 one page) use ``page_map`` here, so they always agree on which reporter is
 marked and where its pages break.
+
+A case can have several stored texts, each marking a different reporter: the
+corpus's recovered page texts (one per reporter cite) and its full_text, e.g. a
+decision CourtListener held twice, once under the official cite and once under
+the Pacific cite. They arrive joined with ``TEXT_SEP``; ``page_maps`` maps each
+(since 2026-11-25; before, one reporter per case).
 """
 
 from __future__ import annotations
@@ -145,6 +151,40 @@ def page_map(text: str | None, cites: list[str]) -> PageMap | None:
             last = page
     return PageMap(cite=cite, cite_normalized=normalize_cite(cite), first_page=first,
                    last_page=last, breaks=seq)
+
+
+# Joins a case's stored texts (index.build.text_sql): ASCII record separator between blank
+# lines, which opinion text does not contain (a form feed can: PDF page breaks).
+TEXT_SEP = "\n\n\x1e\n\n"
+
+
+def segments(text: str | None) -> list[str]:
+    """The separate stored texts joined in ``text`` (one, for a single text)."""
+    return [s for s in (text or "").split(TEXT_SEP) if s.strip()]
+
+
+def page_maps(text: str | None, cites: list[str]) -> list[tuple[PageMap, str]]:
+    """(page map, the text it maps) for each reporter whose pages one of the joined
+    texts marks. Each text maps one reporter (``page_map``). When two texts mark the
+    same reporter, the one spanning more pages wins, else the first: a shorter copy
+    (only the lead opinion, or a merged copy missing its last pages) would put pins on
+    the later pages outside the opinion."""
+    out: dict[str, tuple[PageMap, str]] = {}
+    for seg in segments(text):
+        pm = page_map(seg, cites)
+        if not pm:
+            continue
+        had = out.get(pm.cite_normalized)
+        if had is None or (pm.last_page - pm.first_page) > (had[0].last_page - had[0].first_page):
+            out[pm.cite_normalized] = (pm, seg)
+    return list(out.values())
+
+
+def page_map_for(text: str | None, cites: list[str], cite: str) -> tuple[PageMap, str] | None:
+    """The page map of ``cite``'s reporter and the text it maps, or None when no
+    joined text marks that reporter."""
+    want = normalize_cite(cite)
+    return next(((pm, seg) for pm, seg in page_maps(text, cites) if pm.cite_normalized == want), None)
 
 
 def page_texts(text: str, pm: PageMap) -> dict[int, str]:

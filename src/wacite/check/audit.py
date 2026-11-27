@@ -33,7 +33,7 @@ from wacite.models import (
     ParsedCitation,
 )
 from wacite.normalize import names_match, normalize_cite
-from wacite.pages import page_map, page_texts, parse_pin, quote_pages
+from wacite.pages import page_map_for, page_texts, parse_pin, quote_pages
 from wacite.parse.citations import parse_citations
 from wacite.parse.document import extract_text
 from wacite.parse.shortform import expand_shortforms
@@ -210,16 +210,19 @@ def _check_pin(cit: ParsedCitation, auth: AuthorityRecord, index: CiteIndex) -> 
     """(finding, checked). Checks the pin against the marked pages of the reporter
     the pin is given in; any other reporter's pages can't be checked."""
     pins = parse_pin(cit.pincite)
-    pr = index.page_range(auth.authority_id)
-    if pins is None or pr is None:
-        why = "no page markers stored for this opinion" if pr is None else "pin not understood"
+    ranges = index.page_ranges(auth.authority_id)
+    if pins is None or not ranges:
+        why = "no page markers stored for this opinion" if not ranges else "pin not understood"
         return _finding(cit, FindingType.PIN_NOT_VERIFIED,
                         f"pin cite 'at {cit.pincite}' could not be verified ({why})", auth), False
-    marked, first, last = pr
-    if normalize_cite(cit.lookup_key) != marked:
+    want = normalize_cite(cit.lookup_key)
+    pr = next((r for r in ranges if r[0] == want), None)
+    if pr is None:
+        marked = " and ".join(r[0] for r in ranges)
         return _finding(cit, FindingType.PIN_NOT_VERIFIED,
                         f"pin cite 'at {cit.pincite}' could not be verified (the stored text marks the "
                         f"pages of {marked}, not {cit.lookup_key})", auth), False
+    _marked, first, last = pr
     start, end = pins
     if start < first or end > last:
         return _finding(cit, FindingType.PIN_OUT_OF_RANGE,
@@ -229,13 +232,18 @@ def _check_pin(cit: ParsedCitation, auth: AuthorityRecord, index: CiteIndex) -> 
 
 
 def _check_quote(cit: ParsedCitation, auth: AuthorityRecord, quote: str, opinion: str) -> tuple[Finding | None, bool]:
-    """(finding, checked): is the quotation on the pinned page? When the pinned page
-    can't be located (no pin, no page markers, or another reporter's pages are
-    marked), the quotation is still looked for anywhere in the opinion."""
-    pm = page_map(opinion, list(auth.parallel_cites) + [auth.canonical_cite])
+    """(finding, checked): is the quotation on the pinned page? The page is read from
+    the stored text that marks the pin's reporter (``opinion`` may join several, see
+    wacite.pages.TEXT_SEP). When the pinned page can't be located (no pin, no text
+    marks that reporter), or the quotation isn't in that text but is elsewhere in the
+    stored texts, it is looked for anywhere in them."""
     pins = parse_pin(cit.pincite)
+    hit = page_map_for(opinion, list(auth.parallel_cites) + [auth.canonical_cite], cit.lookup_key)
     short = quote if len(quote) <= 70 else quote[:67] + "..."
-    if pm is None or pins is None or pm.cite_normalized != normalize_cite(cit.lookup_key):
+    if (hit is not None and pins is not None and hit[1] != opinion
+            and not quote_pages(quote, {0: hit[1]})[0] and quote_pages(quote, {0: opinion})[0]):
+        hit = None  # e.g. a dissent stored only in full_text, while the page text holds the lead
+    if hit is None or pins is None:
         hits, found_all = quote_pages(quote, {0: opinion})
         if not hits:
             return _finding(cit, FindingType.QUOTE_NOT_FOUND,
@@ -246,7 +254,8 @@ def _check_quote(cit: ParsedCitation, auth: AuthorityRecord, quote: str, opinion
                             f"part of the quotation \"{short}\" was not found in the stored opinion text "
                             f"(page not checked)", auth), True
         return None, True
-    hits, found_all = quote_pages(quote, page_texts(opinion, pm))
+    pm, marked_text = hit
+    hits, found_all = quote_pages(quote, page_texts(marked_text, pm))
     start, end = pins
     if not hits:
         return _finding(cit, FindingType.QUOTE_NOT_FOUND,

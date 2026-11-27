@@ -104,11 +104,13 @@ Exit code is `1` when any ERROR-level finding is present (handy in a pre-filing 
 
 ## Limitations
 
-- **Pin pages** can be checked only in the one reporter whose page breaks the stored text marks,
-  usually the official one (Wash. 2d, Wash. App., F.3d), and only where the text has markers: in a
+- **Pin pages** can be checked only in a reporter whose page breaks a stored text marks, usually
+  the official one (Wash. 2d, Wash. App., F.3d), and only where the text has markers: in a
   November 2026 sample, 98% of Washington Supreme Court opinions, 90% of Court of Appeals, 54% of
-  9th Circuit, nearly all district court opinions. Pin and quote findings are warnings: a stored
-  text can be incomplete (a missing dissent, say). The opinion's text may start several pages after
+  9th Circuit, nearly all district court opinions. A case can have several stored texts, such as an
+  official copy and a Pacific Reporter copy of one decision; each reporter one of them marks gets
+  its own page range (since November 25, 2026; before, one reporter per case). Pin and quote
+  findings are warnings: a stored text can be incomplete (a missing dissent, say). The opinion's text may start several pages after
   its first page (an official reporter's syllabus and headnotes), and a separate opinion stored after
   the lead one may start over at a lower page; both are mapped. A quotation that crosses a page
   break inside such a separate opinion can be missed.

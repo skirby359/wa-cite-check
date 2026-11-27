@@ -28,8 +28,7 @@ from wacite.models import (
     FindingType,
     ParsedCitation,
 )
-from wacite.normalize import normalize_cite
-from wacite.pages import page_map, page_texts, parse_pin
+from wacite.pages import page_map_for, page_texts, parse_pin
 
 # The pinned page is what a pin cite claims supports the proposition; a quotation or
 # sentence may run onto the next page, so its opening is included too.
@@ -223,13 +222,14 @@ def pinned_page_passage(cit: ParsedCitation, auth: AuthorityRecord, text: str | 
     pins = parse_pin(cit.pincite)
     if not text or pins is None:
         return None
-    pm = page_map(text, list(auth.parallel_cites) + [auth.canonical_cite])
-    if pm is None or pm.cite_normalized != normalize_cite(cit.lookup_key):
+    hit = page_map_for(text, list(auth.parallel_cites) + [auth.canonical_cite], cit.lookup_key)
+    if hit is None:
         return None
+    pm, marked_text = hit
     start, end = pins
     if start < pm.first_page or end > pm.last_page:
         return None
-    pages = page_texts(text, pm)
+    pages = page_texts(marked_text, pm)
     body = " ".join(pages.get(p, "") for p in range(start, end + 1))
     body += " " + pages.get(end + 1, "")[:_NEXT_PAGE_CHARS]
     label = f"pinned page {cit.pincite}"

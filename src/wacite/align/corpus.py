@@ -37,7 +37,7 @@ def connect(dsn: str | None = None):
 
 def fetch_full_text(conn, authority_id: str) -> str | None:
     """The stored text of one authority (for the pinned-page excerpt), with recovered star
-    pagination where the corpus has it."""
+    pagination where the corpus has it: several texts joined with wacite.pages.TEXT_SEP."""
     from wacite.index.build import text_sql
 
     row = conn.execute(

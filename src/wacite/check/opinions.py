@@ -10,7 +10,9 @@ from __future__ import annotations
 
 
 class CorpusText:
-    """Callable: authority id -> stored opinion text (None if absent)."""
+    """Callable: authority id -> stored opinion text (None if absent). A case with several
+    stored texts (recovered page texts per reporter, full_text) gets them joined with
+    wacite.pages.TEXT_SEP."""
 
     def __init__(self, dsn: str | None = None):
         self._dsn = dsn
